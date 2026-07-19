@@ -22,12 +22,20 @@ def decrypt_license(token: bytes) -> bytes:
     return fernet.decrypt(token)
 
 
+class SignatureVerificationError(Exception):
+    """Возникает, когда подпись невозможно проверить из-за ошибки конфигурации
+    (например, повреждённый открытый ключ), а не из-за неверной подписи."""
+
+
 def verify_signature(payload: dict, public_key_pem: bytes) -> bool:
     """
     Проверяет подпись в словаре лицензии.
     Ожидается, что payload содержит поле "signature" в hex формате.
 
-    Возвращает True при успешной проверке, False при неверной подписи.
+    Возвращает True при успешной проверке, False при отсутствии или неверной
+    подписи. Ошибки, не связанные с самой подписью (повреждённый открытый ключ
+    и т.п.), поднимаются как SignatureVerificationError, а не маскируются под
+    "неверную подпись".
     """
     signature_hex = payload.get("signature")
     if not signature_hex:
@@ -35,14 +43,20 @@ def verify_signature(payload: dict, public_key_pem: bytes) -> bool:
 
     try:
         signature = bytes.fromhex(signature_hex)
-    except Exception:
+    except (ValueError, TypeError):
+        # Некорректный формат подписи — это неверная подпись, не ошибка.
         return False
 
     # данные, которые подписывались — JSON без поля signature
     data_obj = {k: v for k, v in payload.items() if k != "signature"}
     data = json.dumps(data_obj, sort_keys=True).encode("utf-8")
 
-    public_key = serialization.load_pem_public_key(public_key_pem)
+    try:
+        public_key = serialization.load_pem_public_key(public_key_pem)
+    except (ValueError, TypeError) as e:
+        raise SignatureVerificationError(
+            f"Не удалось загрузить открытый ключ: {e}"
+        ) from e
 
     try:
         public_key.verify(
@@ -53,6 +67,4 @@ def verify_signature(payload: dict, public_key_pem: bytes) -> bool:
         )
         return True
     except InvalidSignature:
-        return False
-    except Exception:
         return False
