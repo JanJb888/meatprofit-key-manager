@@ -4,10 +4,9 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
 
-from utils.crypto import encrypt_license
+from utils.crypto import encrypt_license, sign_payload
 from core.license_manager import LicenseManager, LicenseError, PUBLIC_KEY_FILE
 
 
@@ -25,15 +24,9 @@ def generate_rsa_keypair():
     return private_key, private_pem, public_pem
 
 
-def sign_payload_with_private(payload: dict, private_key) -> dict:
-    data = json.dumps(payload, sort_keys=True).encode("utf-8")
-    signature = private_key.sign(
-        data,
-        padding.PKCS1v15(),
-        hashes.SHA256()
-    )
+def sign_payload_with_private(payload: dict, private_pem: bytes) -> dict:
     p = dict(payload)
-    p["signature"] = signature.hex()
+    p["signature"] = sign_payload(payload, private_pem)
     return p
 
 
@@ -47,7 +40,7 @@ def test_validate_success(tmp_path, monkeypatch):
         "fingerprint": "TEST-FP-123",
     }
 
-    signed = sign_payload_with_private(payload, private_key)
+    signed = sign_payload_with_private(payload, private_pem)
 
     usb_dir = tmp_path / "usb"
     usb_dir.mkdir()
