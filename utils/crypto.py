@@ -22,6 +22,29 @@ def decrypt_license(token: bytes) -> bytes:
     return fernet.decrypt(token)
 
 
+def canonical_payload_bytes(payload: dict) -> bytes:
+    """
+    Детерминированная сериализация payload лицензии для подписи/проверки.
+    Поле "signature" исключается, чтобы подпись и проверка совпадали.
+    """
+    data_obj = {k: v for k, v in payload.items() if k != "signature"}
+    return json.dumps(data_obj, sort_keys=True).encode("utf-8")
+
+
+def sign_payload(payload: dict, private_key_pem: bytes) -> str:
+    """
+    Подписывает payload лицензии закрытым ключом (PEM).
+    Возвращает подпись в hex формате.
+    """
+    private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+    signature = private_key.sign(
+        canonical_payload_bytes(payload),
+        padding.PKCS1v15(),
+        hashes.SHA256(),
+    )
+    return signature.hex()
+
+
 def verify_signature(payload: dict, public_key_pem: bytes) -> bool:
     """
     Проверяет подпись в словаре лицензии.
@@ -38,16 +61,12 @@ def verify_signature(payload: dict, public_key_pem: bytes) -> bool:
     except Exception:
         return False
 
-    # данные, которые подписывались — JSON без поля signature
-    data_obj = {k: v for k, v in payload.items() if k != "signature"}
-    data = json.dumps(data_obj, sort_keys=True).encode("utf-8")
-
     public_key = serialization.load_pem_public_key(public_key_pem)
 
     try:
         public_key.verify(
             signature,
-            data,
+            canonical_payload_bytes(payload),
             padding.PKCS1v15(),
             hashes.SHA256(),
         )
